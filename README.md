@@ -330,27 +330,16 @@ Provides a REST API to manage target sites and inspect logs. Intended to be pair
 | GET | `/runs` | List recent agent runs (filterable by site_id) |
 | GET | `/anomalies` | List unresolved anomalies |
 | POST | `/anomalies/{id}/resolve` | Mark anomaly as resolved |
-| POST | `/trigger` | Manually trigger orchestrator for a site |
-| GET | `/health` | API health check |
+| POST | `/sites/trigger` | Queue an orchestrator run for one site (`{"site_id": ...}`) or all active sites; returns 202 immediately |
+| GET | `/health` | API health check (includes whether the scheduler is running) |
 
-**Authentication:** Supabase JWT token passed in `Authorization: Bearer <token>` header. FastAPI middleware validates it against Supabase Auth.
+**Authentication:** Supabase JWT token passed in `Authorization: Bearer <token>` header, verified against Supabase Auth. Each user only sees and controls their own sites, runs and anomalies. With `MOCK_SUPABASE=true` auth is disabled for local development.
 
 ---
 
 ## Scheduler (`scheduler/runner.py`)
 
-Uses `APScheduler` (AsyncIOScheduler) to trigger the Orchestrator at regular intervals.
-
-```python
-# Runs every CHECK_INTERVAL_MINUTES minutes globally
-# Each site can override this with its own check_interval_minutes field
-scheduler.add_job(
-    orchestrator.run,
-    trigger="interval",
-    minutes=CHECK_INTERVAL_MINUTES,
-    id="main_orchestrator_job"
-)
-```
+Uses `APScheduler` (AsyncIOScheduler) with a one-minute tick. Each tick runs the Orchestrator only for sites whose own `check_interval_minutes` has elapsed since their last run (`CHECK_INTERVAL_MINUTES` is the default for sites without one).
 
 The scheduler runs in the same process as the FastAPI app (started in `api/main.py` lifespan events) to keep Docker services minimal.
 
