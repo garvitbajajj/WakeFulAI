@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Header, status
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
@@ -11,7 +11,7 @@ import os
 router = APIRouter(prefix="/sites", tags=["Sites"])
 
 # Authentication dependency
-async def get_current_user(authorization: Optional[str] = None):
+async def get_current_user(authorization: Optional[str] = Header(None)):
     # If mock mode is enabled, bypass authentication
     if os.getenv("MOCK_SUPABASE", "true").lower() == "true":
         return "00000000-0000-0000-0000-000000000000"
