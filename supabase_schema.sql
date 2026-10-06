@@ -1,0 +1,55 @@
+-- Enable UUID generation
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Target sites to keep alive
+CREATE TABLE IF NOT EXISTS target_sites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID,                     -- REFERENCES auth.users (can be linked if using auth)
+  url TEXT NOT NULL,
+  name TEXT NOT NULL,
+  session_flow TEXT,              -- Plain English: "navigate to login, click dashboard"
+  check_interval_minutes INTEGER DEFAULT 10,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Every agent run is logged here
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id UUID REFERENCES target_sites(id) ON DELETE CASCADE,
+  agent_type TEXT NOT NULL,       -- 'orchestrator' | 'browser' | 'monitor'
+  status TEXT NOT NULL,           -- 'success' | 'failure' | 'anomaly'
+  latency_ms INTEGER,
+  screenshot_url TEXT,            -- Supabase Storage public URL
+  notes TEXT,                     -- LLM-generated summary of the run
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Anomalies flagged by the monitor agent
+CREATE TABLE IF NOT EXISTS anomalies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id UUID REFERENCES target_sites(id) ON DELETE CASCADE,
+  detected_at TIMESTAMPTZ DEFAULT now(),
+  latency_ms INTEGER,
+  error_message TEXT,
+  resolved BOOLEAN DEFAULT false
+);
+
+-- Row Level Security
+ALTER TABLE target_sites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anomalies ENABLE ROW LEVEL SECURITY;
+
+-- Note: In backend services bypassing RLS with service_role key, these rules restrict anon access.
+CREATE POLICY "Users see own sites" ON target_sites
+  FOR ALL USING (auth.uid() = user_id OR auth.uid() IS NULL);
+
+CREATE POLICY "Users see own runs" ON agent_runs
+  FOR ALL USING (
+    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid() OR auth.uid() IS NULL)
+  );
+
+CREATE POLICY "Users see own anomalies" ON anomalies
+  FOR ALL USING (
+    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid() OR auth.uid() IS NULL)
+  );
