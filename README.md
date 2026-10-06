@@ -61,7 +61,6 @@ sitekeeper/
 │   ├── __init__.py
 │   ├── agent.py            # LangGraph state graph — orchestrator node
 │   ├── planner.py          # Gemini LLM decides which flows to run per site
-│   ├── tools.py            # Tool definitions exposed to sub-agents
 │   └── graph.py            # Full LangGraph graph wiring all agents together
 │
 ├── browser_agent/
