@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- Target sites to keep alive
 CREATE TABLE IF NOT EXISTS target_sites (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID,                     -- REFERENCES auth.users (can be linked if using auth)
+  user_id UUID REFERENCES auth.users,
   url TEXT NOT NULL,
   name TEXT NOT NULL,
   session_flow TEXT,              -- Plain English: "navigate to login, click dashboard"
@@ -40,16 +40,20 @@ ALTER TABLE target_sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE anomalies ENABLE ROW LEVEL SECURITY;
 
--- Note: In backend services bypassing RLS with service_role key, these rules restrict anon access.
+-- The backend uses the service_role key, which bypasses RLS; these policies lock down anon/user-key access.
+DROP POLICY IF EXISTS "Users see own sites" ON target_sites;
+DROP POLICY IF EXISTS "Users see own runs" ON agent_runs;
+DROP POLICY IF EXISTS "Users see own anomalies" ON anomalies;
+
 CREATE POLICY "Users see own sites" ON target_sites
-  FOR ALL USING (auth.uid() = user_id OR auth.uid() IS NULL);
+  FOR ALL USING (auth.uid() = user_id);
 
 CREATE POLICY "Users see own runs" ON agent_runs
   FOR ALL USING (
-    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid() OR auth.uid() IS NULL)
+    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid())
   );
 
 CREATE POLICY "Users see own anomalies" ON anomalies
   FOR ALL USING (
-    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid() OR auth.uid() IS NULL)
+    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid())
   );
