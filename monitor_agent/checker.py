@@ -40,9 +40,9 @@ async def perform_health_check(url: str, site_id: str) -> dict:
     is_zscore_anomaly = False
     if status == "success":
         try:
-            recent_runs = db_client.get_recent_runs(site_id=site_id, limit=10)
-            # Filter runs for 'monitor' type
-            monitor_runs = [r for r in recent_runs if r.get("agent_type") == "monitor" and r.get("status") == "success"]
+            # Each orchestrator cycle logs 3 runs (browser/monitor/orchestrator), so filter in the query
+            recent_runs = db_client.get_recent_runs(site_id=site_id, limit=10, agent_type="monitor")
+            monitor_runs = [r for r in recent_runs if r.get("status") == "success"]
             
             if len(monitor_runs) >= 5:
                 latencies = [r["latency_ms"] for r in monitor_runs]

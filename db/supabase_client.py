@@ -197,12 +197,14 @@ class SupabaseClient:
                 logger.error(f"Supabase log_run error: {e}")
                 return run_data
 
-    def get_recent_runs(self, site_id: str = None, limit: int = 50) -> list[dict]:
+    def get_recent_runs(self, site_id: str = None, limit: int = 50, agent_type: str = None) -> list[dict]:
         if self.mock_mode:
             db = self._read_mock_db()
             runs = db.get("agent_runs", [])
             if site_id:
                 runs = [r for r in runs if r["site_id"] == site_id]
+            if agent_type:
+                runs = [r for r in runs if r["agent_type"] == agent_type]
             runs = sorted(runs, key=lambda x: x["created_at"], reverse=True)
             return runs[:limit]
         else:
@@ -210,6 +212,8 @@ class SupabaseClient:
                 query = self.client.table("agent_runs").select("*")
                 if site_id:
                     query = query.eq("site_id", site_id)
+                if agent_type:
+                    query = query.eq("agent_type", agent_type)
                 response = query.order("created_at", desc=True).limit(limit).execute()
                 return response.data
             except Exception as e:
