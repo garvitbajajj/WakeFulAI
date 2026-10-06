@@ -650,6 +650,9 @@ DASHBOARD_HTML = """
     </footer>
 
     <script>
+        // Escape server data before putting it in innerHTML (site titles/errors come from monitored pages)
+        const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+
         async function fetchAPI(endpoint, method = 'GET', body = null) {
             const options = { method, headers: {} };
             if (body) {
@@ -688,8 +691,8 @@ DASHBOARD_HTML = """
                 item.className = 'site-item';
                 item.innerHTML = `
                     <div class="site-info">
-                        <div class="site-name-display">${site.name}</div>
-                        <div class="site-url-display">${site.url}</div>
+                        <div class="site-name-display">${esc(site.name)}</div>
+                        <div class="site-url-display">${esc(site.url)}</div>
                     </div>
                     <div class="site-actions">
                         <button class="btn btn-primary btn-small" onclick="triggerSite('${site.id}')">⚡ Run</button>
@@ -731,8 +734,8 @@ DASHBOARD_HTML = """
                 let screenshotHtml = '';
                 if (run.screenshot_url) {
                     screenshotHtml = `
-                        <div class="run-screenshot-container" onclick="openModal('${run.screenshot_url}')">
-                            <img src="${run.screenshot_url}" alt="Screenshot">
+                        <div class="run-screenshot-container" onclick="openModal(this.querySelector('img').src)">
+                            <img src="${esc(run.screenshot_url)}" alt="Screenshot">
                             <div class="screenshot-overlay">🔍 Click to zoom screenshot</div>
                         </div>
                     `;
@@ -740,10 +743,10 @@ DASHBOARD_HTML = """
 
                 card.innerHTML = `
                     <div class="run-meta">
-                        <span class="run-agent-badge ${agentClass}">${run.agent_type}</span>
-                        <span class="run-status-badge ${statusClass}">${run.status}</span>
+                        <span class="run-agent-badge ${agentClass}">${esc(run.agent_type)}</span>
+                        <span class="run-status-badge ${statusClass}">${esc(run.status)}</span>
                     </div>
-                    <div class="run-details">${run.notes || 'No description provided.'}</div>
+                    <div class="run-details">${esc(run.notes || 'No description provided.')}</div>
                     ${screenshotHtml}
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <span class="run-time">⏱️ Latency: <span class="text-bold">${latencyText}</span></span>
@@ -781,8 +784,8 @@ DASHBOARD_HTML = """
                         <button class="btn btn-secondary btn-small" onclick="resolveAnomaly('${anomaly.id}')">Resolve Alert</button>
                     </div>
                     <div class="anomaly-text">
-                        <strong>Error message:</strong> ${anomaly.error_message}<br>
-                        <strong>Latency:</strong> ${anomaly.latency_ms}ms | <strong>Detected at:</strong> ${formattedDate}
+                        <strong>Error message:</strong> ${esc(anomaly.error_message)}<br>
+                        <strong>Latency:</strong> ${esc(anomaly.latency_ms)}ms | <strong>Detected at:</strong> ${formattedDate}
                     </div>
                 `;
                 container.appendChild(card);
