@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MOCK_SUPABASE = os.getenv("MOCK_SUPABASE", "true").lower() == "true"
+# Default to live mode: mock mode disables auth, so it must be opted into explicitly
+MOCK_SUPABASE = os.getenv("MOCK_SUPABASE", "false").lower() == "true"
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
@@ -21,11 +22,7 @@ class SupabaseClient:
             self._init_mock_db()
         else:
             if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-                logger.error("Supabase credentials missing. Defaulting to MOCK mode.")
-                self.mock_mode = True
-                self.db_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".local_db.json")
-                self._init_mock_db()
-                return
+                raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_KEY missing. Set them, or set MOCK_SUPABASE=true for local dev.")
             logger.info(f"SupabaseClient: Running in LIVE mode connecting to {SUPABASE_URL}")
             from supabase import create_client, Client
             self.client: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)

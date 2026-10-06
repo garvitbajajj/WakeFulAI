@@ -6,14 +6,13 @@ from api.schemas import SiteCreate, SiteUpdate, SiteResponse
 from db import db_client
 from orchestrator import run_orchestrator
 from loguru import logger
-import os
 
 router = APIRouter(prefix="/sites", tags=["Sites"])
 
 # Authentication dependency
 async def get_current_user(authorization: Optional[str] = Header(None)):
     # If mock mode is enabled, bypass authentication
-    if os.getenv("MOCK_SUPABASE", "true").lower() == "true":
+    if db_client.mock_mode:
         # Local single-user mode: no owner filtering
         return None
         
