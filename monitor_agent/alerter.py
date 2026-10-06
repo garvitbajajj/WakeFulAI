@@ -1,6 +1,6 @@
 import os
 import httpx
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 from db import db_client
 
@@ -30,7 +30,7 @@ async def trigger_anomaly_alert(site: dict, latency_ms: int, error_message: str)
         f"*URL:* {site_url}\n"
         f"*Latency:* {latency_ms}ms\n"
         f"*Error Details:* `{error_message}`\n"
-        f"*Timestamp:* {datetime.utcnow().isoformat()}Z"
+        f"*Timestamp:* {datetime.now(timezone.utc).isoformat(timespec='seconds')}"
     )
 
 async def trigger_recovery_alert(site: dict, open_anomalies: list[dict], latency_ms: int):
@@ -46,7 +46,7 @@ async def trigger_recovery_alert(site: dict, open_anomalies: list[dict], latency
         f"*Site Name:* {site['name']}\n"
         f"*URL:* {site['url']}\n"
         f"*Latency:* {latency_ms}ms\n"
-        f"*Timestamp:* {datetime.utcnow().isoformat()}Z"
+        f"*Timestamp:* {datetime.now(timezone.utc).isoformat(timespec='seconds')}"
     )
 
 async def _post_webhook(text: str):

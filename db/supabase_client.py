@@ -2,7 +2,7 @@ import os
 import json
 import uuid
 import base64
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -14,6 +14,9 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 # Mock-mode screenshot storage, served by the API at /screenshots
 SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".screenshots")
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 class SupabaseClient:
     def __init__(self):
@@ -43,7 +46,7 @@ class SupabaseClient:
                         "session_flow": "1. Navigate to url\n2. Verify the status code is 200",
                         "check_interval_minutes": 10,
                         "is_active": True,
-                        "created_at": datetime.utcnow().isoformat() + "Z"
+                        "created_at": _now_iso()
                     }
                 ],
                 "agent_runs": [],
@@ -122,7 +125,7 @@ class SupabaseClient:
                 "session_flow": site_data.get("session_flow"),
                 "check_interval_minutes": site_data.get("check_interval_minutes", 10),
                 "is_active": site_data.get("is_active", True),
-                "created_at": datetime.utcnow().isoformat() + "Z"
+                "created_at": _now_iso()
             }
             db["target_sites"].append(new_site)
             self._save_mock_db(db)
@@ -188,7 +191,7 @@ class SupabaseClient:
         if self.mock_mode:
             db = self._read_mock_db()
             run_data["id"] = str(uuid.uuid4())
-            run_data["created_at"] = datetime.utcnow().isoformat() + "Z"
+            run_data["created_at"] = _now_iso()
             db["agent_runs"].append(run_data)
             self._save_mock_db(db)
             return run_data
@@ -239,7 +242,7 @@ class SupabaseClient:
         if self.mock_mode:
             db = self._read_mock_db()
             anomaly_data["id"] = str(uuid.uuid4())
-            anomaly_data["detected_at"] = datetime.utcnow().isoformat() + "Z"
+            anomaly_data["detected_at"] = _now_iso()
             db["anomalies"].append(anomaly_data)
             self._save_mock_db(db)
             return anomaly_data
@@ -290,7 +293,7 @@ class SupabaseClient:
     # --- Storage for screenshots ---
 
     def upload_screenshot(self, site_id: str, image_bytes: bytes) -> str:
-        filename = f"{site_id}/{int(datetime.utcnow().timestamp() * 1000)}.png"
+        filename = f"{site_id}/{int(datetime.now(timezone.utc).timestamp() * 1000)}.png"
         if self.mock_mode:
             # Save as a file served by the API at /screenshots, so the JSON DB doesn't bloat with base64
             path = os.path.join(SCREENSHOT_DIR, filename)
