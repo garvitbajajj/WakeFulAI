@@ -14,7 +14,8 @@ router = APIRouter(prefix="/sites", tags=["Sites"])
 async def get_current_user(authorization: Optional[str] = Header(None)):
     # If mock mode is enabled, bypass authentication
     if os.getenv("MOCK_SUPABASE", "true").lower() == "true":
-        return "00000000-0000-0000-0000-000000000000"
+        # Local single-user mode: no owner filtering
+        return None
         
     if not authorization:
         raise HTTPException(
@@ -34,14 +35,23 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
             detail="Invalid JWT token or expired session"
         )
 
+def get_owned_site(site_id: str, user_id: Optional[str]) -> dict:
+    """Fetch a site, 404-ing if it doesn't exist or belongs to another user."""
+    site = db_client.get_site(site_id)
+    if not site or (user_id and site.get("user_id") != user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    return site
+
+def owned_site_ids(user_id: Optional[str]) -> Optional[list[str]]:
+    """IDs of the user's sites, or None (no filter) in local single-user mode."""
+    return None if user_id is None else [s["id"] for s in db_client.get_all_sites(user_id)]
+
 class TriggerPayload(BaseModel):
     site_id: Optional[str] = None
 
 @router.get("", response_model=List[SiteResponse])
 async def list_sites(user_id: str = Depends(get_current_user)):
-    sites = db_client.get_all_sites()
-    # Filter by user if not mock/admin, or return all
-    return sites
+    return db_client.get_all_sites(user_id)
 
 @router.post("", response_model=SiteResponse, status_code=status.HTTP_201_CREATED)
 async def create_site(site: SiteCreate, user_id: str = Depends(get_current_user)):
@@ -61,10 +71,8 @@ async def create_site(site: SiteCreate, user_id: str = Depends(get_current_user)
 
 @router.put("/{site_id}", response_model=SiteResponse)
 async def update_site(site_id: UUID, site_update: SiteUpdate, user_id: str = Depends(get_current_user)):
-    existing = db_client.get_site(str(site_id))
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
-        
+    get_owned_site(str(site_id), user_id)
+
     try:
         update_dict = site_update.model_dump(exclude_unset=True)
         if "url" in update_dict and update_dict["url"] is not None:
@@ -80,6 +88,7 @@ async def update_site(site_id: UUID, site_update: SiteUpdate, user_id: str = Dep
 
 @router.delete("/{site_id}", status_code=status.HTTP_200_OK)
 async def delete_site(site_id: UUID, user_id: str = Depends(get_current_user)):
+    get_owned_site(str(site_id), user_id)
     success = db_client.delete_site(str(site_id))
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
@@ -94,9 +103,7 @@ async def trigger_run(payload: Optional[TriggerPayload] = None, user_id: str = D
     site_id = payload.site_id if payload else None
     
     if site_id:
-        site = db_client.get_site(site_id)
-        if not site:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+        site = get_owned_site(site_id, user_id)
         if not site.get("is_active", True):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Site is inactive")
         
@@ -108,5 +115,11 @@ async def trigger_run(payload: Optional[TriggerPayload] = None, user_id: str = D
         return {"detail": f"Orchestrator successfully run for site: {site['name']}"}
     else:
         logger.info("Manual execution triggered for ALL active sites")
-        await run_orchestrator()
+        if user_id is None:
+            await run_orchestrator()
+        else:
+            # An empty list would make the orchestrator fetch every user's sites, so bail out early
+            sites = [s for s in db_client.get_all_sites(user_id) if s.get("is_active", True)]
+            if sites:
+                await run_orchestrator(sites=sites)
         return {"detail": "Orchestrator successfully run for all active sites"}

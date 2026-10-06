@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from typing import List, Optional
 from uuid import UUID
 from api.schemas import AgentRunResponse
-from api.routes.sites import get_current_user
+from api.routes.sites import get_current_user, get_owned_site, owned_site_ids
 from db import db_client
 
 router = APIRouter(prefix="/runs", tags=["Agent Runs"])
@@ -14,5 +14,7 @@ async def list_runs(
     user_id: str = Depends(get_current_user)
 ):
     site_id_str = str(site_id) if site_id else None
-    runs = db_client.get_recent_runs(site_id=site_id_str, limit=limit)
+    if site_id_str:
+        get_owned_site(site_id_str, user_id)
+    runs = db_client.get_recent_runs(site_id=site_id_str, limit=limit, site_ids=owned_site_ids(user_id))
     return runs

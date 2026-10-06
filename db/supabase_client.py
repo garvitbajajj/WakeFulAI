@@ -81,13 +81,17 @@ class SupabaseClient:
                 logger.error(f"Supabase get_active_sites error: {e}")
                 return []
 
-    def get_all_sites(self) -> list[dict]:
+    def get_all_sites(self, user_id: str = None) -> list[dict]:
         if self.mock_mode:
             db = self._read_mock_db()
-            return db.get("target_sites", [])
+            sites = db.get("target_sites", [])
+            return [s for s in sites if s.get("user_id") == user_id] if user_id else sites
         else:
             try:
-                response = self.client.table("target_sites").select("*").execute()
+                query = self.client.table("target_sites").select("*")
+                if user_id:
+                    query = query.eq("user_id", user_id)
+                response = query.execute()
                 return response.data
             except Exception as e:
                 logger.error(f"Supabase get_all_sites error: {e}")
@@ -197,12 +201,14 @@ class SupabaseClient:
                 logger.error(f"Supabase log_run error: {e}")
                 return run_data
 
-    def get_recent_runs(self, site_id: str = None, limit: int = 50, agent_type: str = None) -> list[dict]:
+    def get_recent_runs(self, site_id: str = None, limit: int = 50, agent_type: str = None, site_ids: list[str] = None) -> list[dict]:
         if self.mock_mode:
             db = self._read_mock_db()
             runs = db.get("agent_runs", [])
             if site_id:
                 runs = [r for r in runs if r["site_id"] == site_id]
+            if site_ids is not None:
+                runs = [r for r in runs if r["site_id"] in site_ids]
             if agent_type:
                 runs = [r for r in runs if r["agent_type"] == agent_type]
             runs = sorted(runs, key=lambda x: x["created_at"], reverse=True)
@@ -212,6 +218,8 @@ class SupabaseClient:
                 query = self.client.table("agent_runs").select("*")
                 if site_id:
                     query = query.eq("site_id", site_id)
+                if site_ids is not None:
+                    query = query.in_("site_id", site_ids)
                 if agent_type:
                     query = query.eq("agent_type", agent_type)
                 response = query.order("created_at", desc=True).limit(limit).execute()
@@ -244,30 +252,37 @@ class SupabaseClient:
                 logger.error(f"Supabase log_anomaly error: {e}")
                 return anomaly_data
 
-    def resolve_anomaly(self, anomaly_id: str) -> dict:
+    def resolve_anomaly(self, anomaly_id: str, site_ids: list[str] = None) -> dict:
         if self.mock_mode:
             db = self._read_mock_db()
             for anomaly in db.get("anomalies", []):
-                if anomaly["id"] == anomaly_id:
+                if anomaly["id"] == anomaly_id and (site_ids is None or anomaly["site_id"] in site_ids):
                     anomaly["resolved"] = True
                     self._save_mock_db(db)
                     return anomaly
             return None
         else:
             try:
-                response = self.client.table("anomalies").update({"resolved": True}).eq("id", anomaly_id).execute()
+                query = self.client.table("anomalies").update({"resolved": True}).eq("id", anomaly_id)
+                if site_ids is not None:
+                    query = query.in_("site_id", site_ids)
+                response = query.execute()
                 return response.data[0] if response.data else None
             except Exception as e:
                 logger.error(f"Supabase resolve_anomaly error: {e}")
                 return None
 
-    def get_unresolved_anomalies(self) -> list[dict]:
+    def get_unresolved_anomalies(self, site_ids: list[str] = None) -> list[dict]:
         if self.mock_mode:
             db = self._read_mock_db()
-            return [a for a in db.get("anomalies", []) if not a.get("resolved", False)]
+            return [a for a in db.get("anomalies", []) if not a.get("resolved", False)
+                    and (site_ids is None or a["site_id"] in site_ids)]
         else:
             try:
-                response = self.client.table("anomalies").select("*").eq("resolved", False).execute()
+                query = self.client.table("anomalies").select("*").eq("resolved", False)
+                if site_ids is not None:
+                    query = query.in_("site_id", site_ids)
+                response = query.execute()
                 return response.data
             except Exception as e:
                 logger.error(f"Supabase get_unresolved_anomalies error: {e}")
