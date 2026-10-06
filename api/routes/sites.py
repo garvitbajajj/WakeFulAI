@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, status
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
@@ -95,30 +95,28 @@ async def delete_site(site_id: UUID, user_id: str = Depends(get_current_user)):
 
 # Register the trigger route under router as well
 @router.post("/trigger", status_code=status.HTTP_202_ACCEPTED)
-async def trigger_run(payload: Optional[TriggerPayload] = None, user_id: str = Depends(get_current_user)):
+async def trigger_run(background_tasks: BackgroundTasks, payload: Optional[TriggerPayload] = None, user_id: str = Depends(get_current_user)):
     """
-    Manually trigger the orchestrator for a specific site or all active sites.
+    Queue an orchestrator run for a specific site or all active sites.
+    Runs after the response is sent, since a browser session takes tens of seconds.
     """
     site_id = payload.site_id if payload else None
-    
+
     if site_id:
         site = get_owned_site(site_id, user_id)
         if not site.get("is_active", True):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Site is inactive")
-        
+
         logger.info(f"Manual execution triggered for site ID: {site_id}")
-        # Run orchestrator graph for this specific site
-        # Since it runs async, we can await it or run in background.
-        # Awaiting is fine for HTTP response validation in test cases.
-        await run_orchestrator(sites=[site])
-        return {"detail": f"Orchestrator successfully run for site: {site['name']}"}
+        background_tasks.add_task(run_orchestrator, sites=[site])
+        return {"detail": f"Orchestrator run queued for site: {site['name']}"}
+
+    logger.info("Manual execution triggered for ALL active sites")
+    if user_id is None:
+        background_tasks.add_task(run_orchestrator)
     else:
-        logger.info("Manual execution triggered for ALL active sites")
-        if user_id is None:
-            await run_orchestrator()
-        else:
-            # An empty list would make the orchestrator fetch every user's sites, so bail out early
-            sites = [s for s in db_client.get_all_sites(user_id) if s.get("is_active", True)]
-            if sites:
-                await run_orchestrator(sites=sites)
-        return {"detail": "Orchestrator successfully run for all active sites"}
+        # An empty list would make the orchestrator fetch every user's sites, so bail out early
+        sites = [s for s in db_client.get_all_sites(user_id) if s.get("is_active", True)]
+        if sites:
+            background_tasks.add_task(run_orchestrator, sites=sites)
+    return {"detail": "Orchestrator run queued for all active sites"}

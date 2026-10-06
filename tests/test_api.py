@@ -42,7 +42,7 @@ def test_api_crud_and_trigger_flow():
     # 4. Trigger Orchestrator Run for this site
     response = client.post("/sites/trigger", json={"site_id": site_id})
     assert response.status_code == 202
-    assert "Orchestrator successfully run" in response.json()["detail"]
+    assert "Orchestrator run queued" in response.json()["detail"]
 
     # 5. Delete target site
     response = client.delete(f"/sites/{site_id}")
