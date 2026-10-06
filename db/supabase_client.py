@@ -12,6 +12,8 @@ load_dotenv()
 MOCK_SUPABASE = os.getenv("MOCK_SUPABASE", "false").lower() == "true"
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+# Mock-mode screenshot storage, served by the API at /screenshots
+SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".screenshots")
 
 class SupabaseClient:
     def __init__(self):
@@ -288,12 +290,14 @@ class SupabaseClient:
     # --- Storage for screenshots ---
 
     def upload_screenshot(self, site_id: str, image_bytes: bytes) -> str:
-        filename = f"{site_id}/{int(datetime.utcnow().timestamp())}.png"
+        filename = f"{site_id}/{int(datetime.utcnow().timestamp() * 1000)}.png"
         if self.mock_mode:
-            # For mock mode, save the screenshot locally to a mock folder or encode it as a Data URL
-            # Data URL is amazing since the API / frontend can display it without extra endpoints!
-            base64_str = base64.b64encode(image_bytes).decode("utf-8")
-            return f"data:image/png;base64,{base64_str}"
+            # Save as a file served by the API at /screenshots, so the JSON DB doesn't bloat with base64
+            path = os.path.join(SCREENSHOT_DIR, filename)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(image_bytes)
+            return f"/screenshots/{filename}"
         else:
             try:
                 # Supposed to upload to 'agent-screenshots' bucket

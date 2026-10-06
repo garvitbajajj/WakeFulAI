@@ -69,3 +69,10 @@ def test_db_client_mock_crud():
     assert success is True
 
     assert db_client.get_site(site_id) is None
+
+def test_mock_screenshot_saved_as_file_and_served():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    url = db_client.upload_screenshot("test-site", b"\x89PNG fake")
+    assert url.startswith("/screenshots/test-site/")
+    assert TestClient(app).get(url).content == b"\x89PNG fake"

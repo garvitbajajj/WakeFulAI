@@ -1,8 +1,11 @@
 from fastapi import FastAPI, Depends, APIRouter
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from api.routes import sites, runs, anomalies
 from scheduler import start_scheduler, stop_scheduler, scheduler
+from db import db_client
+from db.supabase_client import SCREENSHOT_DIR
 from loguru import logger
 import os
 
@@ -27,6 +30,11 @@ app = FastAPI(
 app.include_router(sites.router)
 app.include_router(runs.router)
 app.include_router(anomalies.router)
+
+# Mock mode stores screenshots on disk instead of Supabase Storage
+if db_client.mock_mode:
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    app.mount("/screenshots", StaticFiles(directory=SCREENSHOT_DIR), name="screenshots")
 
 @app.get("/health", tags=["System"])
 async def system_health():
