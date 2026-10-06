@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, APIRouter
 from fastapi.responses import HTMLResponse
 from contextlib import asynccontextmanager
 from api.routes import sites, runs, anomalies
-from scheduler import start_scheduler, stop_scheduler
+from scheduler import start_scheduler, stop_scheduler, scheduler
 from loguru import logger
 import os
 
@@ -30,7 +30,7 @@ app.include_router(anomalies.router)
 
 @app.get("/health", tags=["System"])
 async def system_health():
-    return {"status": "healthy", "scheduler_running": True}
+    return {"status": "healthy", "scheduler_running": scheduler.running}
 
 DASHBOARD_HTML = """
 <!DOCTYPE html>

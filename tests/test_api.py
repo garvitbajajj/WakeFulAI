@@ -4,9 +4,10 @@ from api.main import app
 client = TestClient(app)
 
 def test_system_health():
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "healthy", "scheduler_running": True}
+    # Lifespan (and so the scheduler) only runs when TestClient is used as a context manager
+    assert client.get("/health").json() == {"status": "healthy", "scheduler_running": False}
+    with TestClient(app) as running_client:
+        assert running_client.get("/health").json() == {"status": "healthy", "scheduler_running": True}
 
 def test_api_dashboard_index():
     response = client.get("/")
