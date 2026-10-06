@@ -8,6 +8,8 @@ load_dotenv()
 
 MOCK_GEMINI = os.getenv("MOCK_GEMINI", "true").lower() == "true"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# "-latest" alias tracks the current Flash model, so a model retirement doesn't break planning
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
 async def plan_browser_flow(url: str, session_flow: str) -> list[dict]:
     """
@@ -21,10 +23,8 @@ async def plan_browser_flow(url: str, session_flow: str) -> list[dict]:
         return _fallback_planner(url, session_flow)
         
     try:
-        # Import standard google generative ai library
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
         prompt = f"""
 You are a web automation planner. Translate the following natural language description of web browsing actions into a structured JSON list of steps for Playwright.
 The base URL of the site is: {url}
@@ -46,8 +46,8 @@ Example:
   {{"action": "scroll", "direction": "down", "amount": 500}}
 ]
 """
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
+        llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, google_api_key=GEMINI_API_KEY)
+        response = await llm.ainvoke(prompt)
         text = response.text.strip()
         
         # Clean any markdown block formatting if Gemini ignored the instruction
