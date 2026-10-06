@@ -1,4 +1,4 @@
-from pydantic import BaseModel, HttpUrl, Field
+from pydantic import BaseModel, ConfigDict, HttpUrl, Field
 from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
@@ -27,8 +27,7 @@ class SiteResponse(SiteBase):
     user_id: Optional[UUID] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Agent Runs Schemas ---
 
@@ -42,8 +41,7 @@ class AgentRunResponse(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Anomalies Schemas ---
 
@@ -55,5 +53,4 @@ class AnomalyResponse(BaseModel):
     error_message: Optional[str] = None
     resolved: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
