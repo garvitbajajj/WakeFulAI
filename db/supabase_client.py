@@ -210,7 +210,7 @@ class SupabaseClient:
                 query = self.client.table("agent_runs").select("*")
                 if site_id:
                     query = query.eq("site_id", site_id)
-                response = query.order("created_at", descending=True).limit(limit).execute()
+                response = query.order("created_at", desc=True).limit(limit).execute()
                 return response.data
             except Exception as e:
                 logger.error(f"Supabase get_recent_runs error: {e}")
