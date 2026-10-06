@@ -1,6 +1,6 @@
 from loguru import logger
 from .checker import perform_health_check
-from .alerter import trigger_anomaly_alert
+from .alerter import trigger_anomaly_alert, trigger_recovery_alert
 from db import db_client
 
 async def run_monitor_agent(site: dict) -> dict:
@@ -37,8 +37,14 @@ async def run_monitor_agent(site: dict) -> dict:
     except Exception as e:
         logger.error(f"Monitor Agent: Failed to log run to db: {e}")
 
-    # If anomaly, trigger alerts
+    # Alert once per incident: skip while an anomaly is still open, auto-resolve on recovery
+    open_anomalies = db_client.get_unresolved_anomalies(site_ids=[site_id])
     if status == "anomaly":
-        await trigger_anomaly_alert(site, latency_ms, error_message)
+        if open_anomalies:
+            logger.info(f"Monitor Agent: {site['name']} still has an open anomaly, not re-alerting")
+        else:
+            await trigger_anomaly_alert(site, latency_ms, error_message)
+    elif open_anomalies:
+        await trigger_recovery_alert(site, open_anomalies, latency_ms)
 
     return check_result

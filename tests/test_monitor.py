@@ -65,3 +65,23 @@ async def test_perform_health_check_zscore_anomaly():
             mock_runs.assert_called_with(site_id="mock-site-id", limit=10, agent_type="monitor")
             assert result["status"] == "anomaly"
             assert result["is_zscore_anomaly"] is True
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,open_anomalies,expect_alert,expect_recovery", [
+    ("anomaly", [], True, False),                  # first failure -> alert
+    ("anomaly", [{"id": "a1"}], False, False),     # still down -> no repeat alert
+    ("success", [{"id": "a1"}], False, True),      # back up -> recovery + auto-resolve
+    ("success", [], False, False),                 # healthy -> nothing
+])
+async def test_monitor_alerts_once_per_incident(status, open_anomalies, expect_alert, expect_recovery):
+    from monitor_agent import agent
+    check = {"status": status, "latency_ms": 100, "status_code": 200, "response_size": 1, "error_message": None}
+    site = {"id": "s1", "name": "Site", "url": "https://example.com"}
+    with patch.object(agent, "perform_health_check", AsyncMock(return_value=check)), \
+         patch.object(agent.db_client, "log_run"), \
+         patch.object(agent.db_client, "get_unresolved_anomalies", return_value=open_anomalies), \
+         patch.object(agent, "trigger_anomaly_alert", AsyncMock()) as alert, \
+         patch.object(agent, "trigger_recovery_alert", AsyncMock()) as recovery:
+        await agent.run_monitor_agent(site)
+        assert alert.called is expect_alert
+        assert recovery.called is expect_recovery
