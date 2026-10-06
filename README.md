@@ -73,7 +73,7 @@ sitekeeper/
 │   ├── __init__.py
 │   ├── agent.py            # Health check agent
 │   ├── checker.py          # httpx-based uptime + latency checks
-│   └── alerter.py          # Webhook/email notifications on anomaly detection
+│   └── alerter.py          # Slack webhook alerts on anomaly + recovery
 │
 ├── db/
 │   ├── __init__.py
@@ -189,7 +189,6 @@ CHECK_INTERVAL_MINUTES=10                          # Global default, overridden 
 
 # Alerting (optional)
 WEBHOOK_URL=https://hooks.slack.com/services/...   # Slack webhook for anomaly alerts
-ALERT_EMAIL=you@example.com
 
 # FastAPI
 API_HOST=0.0.0.0
