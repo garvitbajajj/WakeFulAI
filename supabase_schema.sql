@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   status TEXT NOT NULL,           -- 'success' | 'failure' | 'anomaly'
   latency_ms INTEGER,
   screenshot_url TEXT,            -- Supabase Storage public URL
-  notes TEXT,                     -- LLM-generated summary of the run
+  notes TEXT,                     -- Step-by-step log of the run
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
