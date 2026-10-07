@@ -68,3 +68,6 @@ def test_sites_are_scoped_to_owner():
         assert client.delete(f"/sites/{site_id}").status_code == 200
     finally:
         app.dependency_overrides.clear()
+
+def test_dashboard_config_in_mock_mode_skips_login():
+    assert client.get("/config").json() == {"auth_required": False}

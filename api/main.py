@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from api.routes import sites, runs, anomalies
 from scheduler import start_scheduler, stop_scheduler, scheduler
 from db import db_client
-from db.supabase_client import SCREENSHOT_DIR
+from db.supabase_client import SCREENSHOT_DIR, SUPABASE_URL
 from loguru import logger
 import os
 
@@ -39,6 +39,17 @@ if db_client.mock_mode:
 @app.get("/health", tags=["System"])
 async def system_health():
     return {"status": "healthy", "scheduler_running": scheduler.running}
+
+@app.get("/config", tags=["System"])
+async def dashboard_config():
+    """Public settings the dashboard needs to sign users in (the anon/publishable key is safe to expose)."""
+    if db_client.mock_mode:
+        return {"auth_required": False}
+    return {
+        "auth_required": True,
+        "supabase_url": SUPABASE_URL,
+        "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY"),
+    }
 
 DASHBOARD_HTML = """
 <!DOCTYPE html>
