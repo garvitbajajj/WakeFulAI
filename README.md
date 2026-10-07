@@ -149,7 +149,8 @@ set it on a deployment, since it removes authentication.
 
 1. Create a Supabase project.
 2. Run [`supabase_schema.sql`](supabase_schema.sql) in the SQL editor. It creates the tables, indexes, RLS policies and the public `agent-screenshots` Storage bucket, and is safe to re-run.
-3. Set `MOCK_SUPABASE=false`, `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `.env`.
+3. Set `MOCK_SUPABASE=false`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` and `SUPABASE_ANON_KEY` in `.env` (keys are under Project Settings → API Keys).
+4. Under Authentication → URL Configuration, set the **Site URL** to where the dashboard runs (e.g. `http://localhost:8000`), so sign-up confirmation emails link back to it.
 
 If `MOCK_SUPABASE` is not `true` and the Supabase credentials are missing, the app refuses to start rather than silently running without auth.
 
@@ -162,6 +163,7 @@ If `MOCK_SUPABASE` is not `true` and the Supabase credentials are missing, the a
 | `MOCK_SUPABASE` | `false` | `true` = local JSON DB and no auth (dev only) |
 | `SUPABASE_URL` | — | Supabase project URL (required when not mocked) |
 | `SUPABASE_SERVICE_KEY` | — | Service-role key; the backend uses it for all DB access |
+| `SUPABASE_ANON_KEY` | — | Publishable (or legacy anon) key; the dashboard uses it to sign users in |
 | `GEMINI_API_KEY` | — | Google AI Studio key for the planner |
 | `MOCK_GEMINI` | `true` | `true` = skip Gemini and use the rule-based planner |
 | `GEMINI_MODEL` | `gemini-flash-latest` | Gemini model; the `-latest` alias survives model retirements |
@@ -250,10 +252,11 @@ A plain `httpx` GET (10s timeout) — no LLM. The check is an **anomaly** when:
 | GET | `/anomalies` | Unresolved anomalies |
 | POST | `/anomalies/{id}/resolve` | Mark an anomaly resolved |
 | GET | `/health` | API status, including whether the scheduler is running |
+| GET | `/config` | Public settings the dashboard needs for login (whether auth is on, Supabase URL, publishable key) |
 
 **Authentication:** a Supabase JWT in the `Authorization: Bearer <token>` header, verified against Supabase Auth. Requests for another user's site return 404. With `MOCK_SUPABASE=true` auth is disabled.
 
-**Dashboard:** add, run and delete sites; a live feed of runs with status, latency and zoomable screenshots; an anomaly panel with resolve buttons. The run feed and anomalies refresh every 10 seconds. All server data is escaped before rendering, since run notes include text from the monitored pages.
+**Dashboard:** in live mode it opens on an email + password sign-in / sign-up screen (Supabase Auth via `supabase-js`), sends the session token with every request, and returns to the login screen when the session expires; in mock mode it skips login. Once signed in: add, run and delete sites; a live feed of runs with status, latency and zoomable screenshots; an anomaly panel with resolve buttons. The run feed and anomalies refresh every 10 seconds. All server data is escaped before rendering, since run notes include text from the monitored pages.
 
 ### Adding a site
 
@@ -301,7 +304,6 @@ pytest
 
 ## Known Limitations
 
-- **No login screen** — in live mode the API requires a JWT, but the dashboard doesn't send one yet, so it only works in mock mode. Use the API with a token until a login form is added.
 - **Last-run times are in memory** — after a restart, every site runs on the first tick.
 - **Sites run one at a time** — fine for a handful of sites; a large list would need concurrent runs.
 - **Only the monitor raises anomalies** — a failed browser journey is logged as a `failure` run but doesn't alert.
