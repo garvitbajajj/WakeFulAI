@@ -562,6 +562,14 @@ DASHBOARD_HTML = """
         /* Quick helper formatting */
         .text-bold { font-weight: 600; }
         .text-italic { font-style: italic; }
+
+        /* Login screen (live mode only) */
+        .auth-screen { flex: 1; display: flex; justify-content: center; align-items: flex-start; padding: 4rem 1rem; }
+        .auth-card { width: 100%; max-width: 380px; }
+        .auth-msg { margin-top: 1rem; font-size: 0.85rem; color: var(--text-secondary); min-height: 1.2em; }
+        .btn-link { background: none; border: none; padding: 0; margin-top: 0.75rem; color: var(--color-primary); cursor: pointer; font-family: var(--font-family); font-size: 0.85rem; }
+        .header-right { display: flex; align-items: center; gap: 1rem; }
+        .user-area { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: var(--text-secondary); }
     </style>
 </head>
 <body>
@@ -573,13 +581,39 @@ DASHBOARD_HTML = """
             <span class="logo-icon">🤖</span>
             <div class="logo-title">WakeFulAI</div>
         </div>
-        <div class="system-status">
-            <div class="status-dot"></div>
-            <span>Keep-Alive Engine Running</span>
+        <div class="header-right">
+            <div class="system-status">
+                <div class="status-dot"></div>
+                <span>Keep-Alive Engine Running</span>
+            </div>
+            <div class="user-area" id="user-area" style="display: none;">
+                <span id="user-email"></span>
+                <button class="btn btn-secondary btn-small" onclick="signOut()">Sign out</button>
+            </div>
         </div>
     </header>
 
-    <main>
+    <!-- Login screen: shown only when the server requires auth (live Supabase mode) -->
+    <div class="auth-screen" id="auth-screen" style="display: none;">
+        <div class="glass-panel auth-card">
+            <div class="panel-title" id="auth-title">Sign in to WakeFulAI</div>
+            <form id="auth-form">
+                <div class="input-group">
+                    <label class="input-label" for="auth-email">Email</label>
+                    <input class="form-control" type="email" id="auth-email" autocomplete="email" required>
+                </div>
+                <div class="input-group">
+                    <label class="input-label" for="auth-password">Password</label>
+                    <input class="form-control" type="password" id="auth-password" autocomplete="current-password" minlength="6" required>
+                </div>
+                <button class="btn btn-primary" type="submit" id="auth-submit">Sign in</button>
+            </form>
+            <div class="auth-msg" id="auth-msg" role="status"></div>
+            <button class="btn-link" type="button" id="auth-toggle">No account? Create one</button>
+        </div>
+    </div>
+
+    <main id="app" style="display: none;">
         <!-- Sidebar controls -->
         <div style="display: flex; flex-direction: column; gap: 1.5rem;">
             <!-- Site Creation -->
@@ -672,14 +706,28 @@ DASHBOARD_HTML = """
         // Escape server data before putting it in innerHTML (site titles/errors come from monitored pages)
         const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 
+        let sb = null;          // Supabase client, only created when the server requires auth
+        let pollTimer = null;
+        let signUpMode = false;
+
+        async function authHeader() {
+            if (!sb) return {};
+            const { data } = await sb.auth.getSession();  // refreshes the token if it has expired
+            return data.session ? { Authorization: `Bearer ${data.session.access_token}` } : {};
+        }
+
         async function fetchAPI(endpoint, method = 'GET', body = null) {
-            const options = { method, headers: {} };
+            const options = { method, headers: await authHeader() };
             if (body) {
                 options.headers['Content-Type'] = 'application/json';
                 options.body = JSON.stringify(body);
             }
             try {
                 const response = await fetch(endpoint, options);
+                if (response.status === 401 && sb) {
+                    showLogin('Your session has expired. Please sign in again.');
+                    return null;
+                }
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({ detail: 'API Error' }));
                     throw new Error(data.detail || `HTTP error! Status: ${response.status}`);
@@ -876,19 +924,109 @@ DASHBOARD_HTML = """
         }
 
         // Initial Load & polling
-        async function init() {
-            await loadSites();
-            await loadRuns();
-            await loadAnomalies();
-            
+        async function startDashboard() {
+            if (pollTimer) return;  // already running (e.g. a token refresh re-fired the auth event)
             // Auto refresh feeds every 10 seconds to keep live dashboard state
-            setInterval(async () => {
+            pollTimer = setInterval(async () => {
                 await loadRuns();
                 await loadAnomalies();
             }, 10000);
+            await loadSites();
+            await loadRuns();
+            await loadAnomalies();
         }
 
-        window.onload = init;
+        function showApp(user) {
+            document.getElementById('auth-screen').style.display = 'none';
+            document.getElementById('app').style.display = '';
+            if (user) {
+                document.getElementById('user-email').textContent = user.email;
+                document.getElementById('user-area').style.display = 'flex';
+            }
+            startDashboard();
+        }
+
+        function showLogin(message = '') {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            document.getElementById('app').style.display = 'none';
+            document.getElementById('user-area').style.display = 'none';
+            document.getElementById('auth-screen').style.display = 'flex';
+            document.getElementById('auth-msg').textContent = message;
+        }
+
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const tag = document.createElement('script');
+                tag.src = src;
+                tag.onload = resolve;
+                tag.onerror = () => reject(new Error(`Could not load ${src}`));
+                document.head.appendChild(tag);
+            });
+        }
+
+        async function boot() {
+            const cfg = await fetch('/config').then(r => r.json());
+            if (!cfg.auth_required) return showApp(null);  // mock mode: no login
+
+            if (!cfg.supabase_anon_key) {
+                showLogin('Login is not configured: set SUPABASE_ANON_KEY on the server.');
+                document.getElementById('auth-submit').disabled = true;
+                return;
+            }
+            try {
+                await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
+            } catch (err) {
+                return showLogin(err.message);
+            }
+            sb = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+            // Fires once with the stored session on load, then on every sign-in / sign-out.
+            // Deferred with setTimeout: calling Supabase from inside this callback can deadlock.
+            sb.auth.onAuthStateChange((event, session) => {
+                setTimeout(() => session ? showApp(session.user) : showLogin(), 0);
+            });
+        }
+
+        document.getElementById('auth-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const submit = document.getElementById('auth-submit');
+            const msg = document.getElementById('auth-msg');
+            submit.disabled = true;
+            msg.textContent = signUpMode ? 'Creating account...' : 'Signing in...';
+
+            const { data, error } = signUpMode
+                ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } })
+                : await sb.auth.signInWithPassword({ email, password });
+
+            submit.disabled = false;
+            if (error) {
+                msg.textContent = error.message;
+            } else if (signUpMode && !data.session) {
+                toggleAuthMode();
+                msg.textContent = 'Check your email to confirm your account, then sign in.';
+            }
+            // On success, onAuthStateChange switches to the dashboard
+        });
+
+        function toggleAuthMode() {
+            signUpMode = !signUpMode;
+            document.getElementById('auth-title').textContent = signUpMode ? 'Create your WakeFulAI account' : 'Sign in to WakeFulAI';
+            document.getElementById('auth-submit').textContent = signUpMode ? 'Create account' : 'Sign in';
+            document.getElementById('auth-toggle').textContent = signUpMode ? 'Already have an account? Sign in' : 'No account? Create one';
+            document.getElementById('auth-password').autocomplete = signUpMode ? 'new-password' : 'current-password';
+        }
+        document.getElementById('auth-toggle').addEventListener('click', () => {
+            document.getElementById('auth-msg').textContent = '';
+            toggleAuthMode();
+        });
+
+        async function signOut() {
+            await sb.auth.signOut();  // fires SIGNED_OUT -> login screen
+        }
+
+        window.onload = boot;
     </script>
 </body>
 </html>
