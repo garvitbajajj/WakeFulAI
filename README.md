@@ -225,6 +225,8 @@ Runs the steps in order in a fresh headless Chromium (1280×720):
 
 It stops at the first failing step and screenshots the page at that point; otherwise it screenshots the final page. Unknown actions are skipped.
 
+**Windows note:** Playwright launches its browser driver as a subprocess, which on Windows needs asyncio's Proactor event loop. `uvicorn --reload` runs a Selector loop there, so when the agent detects that, it runs the browser session on its own Proactor loop in a worker thread. It works the same with or without `--reload`.
+
 ### 4. Monitor Agent (`monitor_agent/`)
 
 A plain `httpx` GET (10s timeout) — no LLM. The check is an **anomaly** when:
@@ -307,7 +309,8 @@ pytest
 - **Last-run times are in memory** — after a restart, every site runs on the first tick.
 - **Sites run one at a time** — fine for a handful of sites; a large list would need concurrent runs.
 - **Only the monitor raises anomalies** — a failed browser journey is logged as a `failure` run but doesn't alert.
-- **No retention** — old runs and screenshots are never deleted.
+- **No retention** — old runs and screenshots are never deleted, and deleting a site removes its runs but leaves its screenshot files in Storage.
+- **Network-idle waits** — `navigate` waits for the page to go network-quiet (up to 20s). Pages that keep making background requests load slowly and can time out, showing a false `failure`.
 
 ---
 
