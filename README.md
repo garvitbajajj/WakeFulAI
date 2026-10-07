@@ -1,53 +1,61 @@
-# 🤖 SiteKeeper — Multi-Agent Site Health & Keep-Alive System
+# 🤖 WakeFulAI — Multi-Agent Site Health & Keep-Alive System
 
 ## Overview
 
-SiteKeeper is a Python-based multi-agent system that keeps free-tier deployed web applications alive by simulating realistic user sessions, monitoring health metrics, and logging all activity to Supabase. It uses LangGraph for multi-agent orchestration, Playwright for browser automation, and FastAPI for a control dashboard API.
+WakeFulAI runs scripted user journeys against your deployed web apps on a schedule, checks their health, and logs every run with screenshot evidence. You describe a journey in plain English, Gemini turns it into browser steps, and Playwright runs them in a real headless Chromium. LangGraph orchestrates the agents, FastAPI serves the REST API and dashboard, and Supabase stores everything (or a local JSON file in dev mode).
 
-The core problem it solves: platforms like Render, Railway, and Fly.io spin down free-tier services after ~15 minutes of inactivity. SiteKeeper intelligently simulates user activity to prevent this, while also acting as a lightweight observability layer.
+It started as a keep-alive tool: platforms like Render, Railway and Fly.io spin down free-tier services after ~15 minutes of inactivity, and regular visits keep them warm.
+
+### Intended use
+
+Point this at applications you own. Synthetic traffic whose purpose is to
+defeat an idle timeout is against the terms of most free tiers, so using it
+that way risks the deployment it is meant to protect — and a paid instance or
+the platform's own cron is the honest fix for a service that must stay warm.
+
+The part that holds up on any deployment, free or paid, is the monitoring:
+scripted user journeys that prove a real flow still works, latency tracking
+with anomaly detection, screenshot evidence of each run, and alerts when a
+check fails. Run it as synthetic monitoring and the keep-alive is a side
+effect rather than the point.
+
+### What it does
+
+- **Plain-English journeys** — "go to the homepage, click 'Get Started', scroll down 500, go to /about" becomes a list of browser steps (Gemini, with a rule-based fallback)
+- **Real browser runs** — Playwright Chromium executes the steps and screenshots the end state, or the exact step that failed
+- **Health checks** — status code, latency and response size on every run
+- **Anomaly detection** — non-2xx, >5s latency, connection failures, and latency spikes vs. the site's own recent history (z-score)
+- **Alerting** — one Slack message per incident, plus a recovery message and auto-resolve when the site is healthy again
+- **Per-site schedules** — each site has its own check interval
+- **Multi-user** — Supabase Auth; users only see their own sites, runs and anomalies (enforced in the API and by Row Level Security)
+- **Dashboard + REST API** — add/run/delete sites, live run feed with screenshots, anomaly panel
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     APScheduler (runner.py)                  │
-│              Triggers orchestrator every N minutes           │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-              ┌────────────▼────────────┐
-              │   Orchestrator Agent    │
-              │   (LangGraph + Gemini)  │
-              │  Reads target sites     │
-              │  Plans which flows to   │
-              │  trigger per site       │
-              └──────┬─────────┬────────┘
-                     │         │
-        ┌────────────▼──┐  ┌───▼──────────────┐
-        │ Browser Agent │  │  Monitor Agent    │
-        │  (Playwright) │  │  (httpx)          │
-        │               │  │                   │
-        │ Simulates real │  │ Health checks,   │
-        │ user sessions  │  │ latency tracking,│
-        │ Screenshots    │  │ anomaly detection,│
-        │ uploaded to    │  │ webhook alerts    │
-        │ Supabase       │  │                   │
-        └───────┬────────┘  └────────┬──────────┘
-                │                    │
-        ┌───────▼────────────────────▼──────────┐
-        │              Supabase                  │
-        │  PostgreSQL  │  Realtime  │  Storage   │
-        │  (logs, runs,│  (live     │  (screens- │
-        │   anomalies) │   updates) │   hots)    │
-        └────────────────────────────────────────┘
-                           │
-              ┌────────────▼────────────┐
-              │     FastAPI Dashboard   │
-              │  CRUD for target sites  │
-              │  View logs & anomalies  │
-              │  Start/stop agents      │
-              └─────────────────────────┘
+      APScheduler (1-minute tick)          POST /sites/trigger
+                 │                                 │
+                 └────────────────┬────────────────┘
+                                  ▼
+              ┌───────────────────────────────────────┐
+              │        Orchestrator (LangGraph)        │
+              │  for each due site:                    │
+              │  plan_flow → dispatch_browser →        │
+              │  dispatch_monitor → log_results        │
+              └─────┬──────────────┬──────────────┬────┘
+                    ▼              ▼              ▼
+                Planner      Browser Agent   Monitor Agent
+              (Gemini, or    (Playwright,    (httpx check, z-score,
+              rule fallback)  screenshots)    Slack alert / recovery)
+                    └──────────────┬──────────────┘
+                                   ▼
+               Supabase — Postgres · Storage · Auth
+          (or .local_db.json + .screenshots/ in mock mode)
+                                   │
+                                   ▼
+                 FastAPI — REST API + dashboard at /
 ```
 
 ---
@@ -55,364 +63,50 @@ The core problem it solves: platforms like Render, Railway, and Fly.io spin down
 ## Project Structure
 
 ```
-sitekeeper/
+WakeFulAI/
 │
 ├── orchestrator/
-│   ├── __init__.py
-│   ├── agent.py            # LangGraph state graph — orchestrator node
-│   ├── planner.py          # Gemini LLM decides which flows to run per site
-│   └── graph.py            # Full LangGraph graph wiring all agents together
+│   ├── __init__.py         # run_orchestrator() entrypoint
+│   ├── agent.py            # OrchestratorState (LangGraph state schema)
+│   ├── graph.py            # LangGraph nodes and edges
+│   └── planner.py          # Gemini / rule-based plain-English → browser steps
 │
 ├── browser_agent/
 │   ├── __init__.py
-│   ├── agent.py            # LangChain agent with Playwright tools
+│   ├── agent.py            # Executes planned steps, captures screenshots
 │   ├── actions.py          # navigate(), click(), fill_form(), scroll(), screenshot()
-│   └── session.py          # Playwright browser context lifecycle manager
+│   └── session.py          # Headless Chromium lifecycle (fresh browser per run)
 │
 ├── monitor_agent/
 │   ├── __init__.py
-│   ├── agent.py            # Health check agent
-│   ├── checker.py          # httpx-based uptime + latency checks
-│   └── alerter.py          # Slack webhook alerts on anomaly + recovery
+│   ├── agent.py            # Runs the check, logs it, decides alert vs. recovery
+│   ├── checker.py          # httpx health check + z-score latency anomaly
+│   └── alerter.py          # Anomaly + recovery Slack webhooks
 │
 ├── db/
 │   ├── __init__.py
-│   └── supabase_client.py  # Shared Supabase client + all DB helper functions
+│   └── supabase_client.py  # Supabase client (live) / JSON file DB (mock) + all queries
 │
 ├── api/
 │   ├── __init__.py
-│   ├── main.py             # FastAPI app entrypoint
-│   ├── routes/
-│   │   ├── sites.py        # CRUD for target_sites table
-│   │   ├── runs.py         # Read agent_runs logs
-│   │   └── anomalies.py    # Read and resolve anomalies
-│   └── schemas.py          # Pydantic models for request/response validation
+│   ├── main.py             # FastAPI app, lifespan (scheduler), dashboard HTML
+│   ├── schemas.py          # Pydantic request/response models
+│   └── routes/
+│       ├── sites.py        # Auth, site CRUD, manual trigger
+│       ├── runs.py         # Run history
+│       └── anomalies.py    # List / resolve anomalies
 │
 ├── scheduler/
 │   ├── __init__.py
-│   └── runner.py           # APScheduler — triggers orchestrator on interval
+│   └── runner.py           # 1-minute tick, runs sites whose interval is due
 │
-├── tests/
-│   ├── test_monitor.py
-│   ├── test_browser.py
-│   └── test_api.py
+├── tests/                  # pytest suite (see Tests)
 │
+├── supabase_schema.sql     # Tables + RLS policies
 ├── .env.example            # Template for environment variables
-├── .env                    # Actual secrets — never commit this
 ├── requirements.txt
-├── docker-compose.yml      # Wires all services together
-└── README.md
-```
-
----
-
-## Supabase Schema
-
-Run these SQL statements in the Supabase SQL editor to set up the database.
-
-```sql
--- Enable UUID generation
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
--- Target sites to keep alive
-CREATE TABLE target_sites (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES auth.users,
-  url TEXT NOT NULL,
-  name TEXT NOT NULL,
-  session_flow TEXT,              -- Plain English: "navigate to login, click dashboard"
-  check_interval_minutes INTEGER DEFAULT 10,
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- Every agent run is logged here
-CREATE TABLE agent_runs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  site_id UUID REFERENCES target_sites(id) ON DELETE CASCADE,
-  agent_type TEXT NOT NULL,       -- 'orchestrator' | 'browser' | 'monitor'
-  status TEXT NOT NULL,           -- 'success' | 'failure' | 'anomaly'
-  latency_ms INTEGER,
-  screenshot_url TEXT,            -- Supabase Storage public URL
-  notes TEXT,                     -- LLM-generated summary of the run
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- Anomalies flagged by the monitor agent
-CREATE TABLE anomalies (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  site_id UUID REFERENCES target_sites(id) ON DELETE CASCADE,
-  detected_at TIMESTAMPTZ DEFAULT now(),
-  latency_ms INTEGER,
-  error_message TEXT,
-  resolved BOOLEAN DEFAULT false
-);
-
--- Row Level Security
-ALTER TABLE target_sites ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE anomalies ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users see own sites" ON target_sites
-  FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "Users see own runs" ON agent_runs
-  FOR ALL USING (
-    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid())
-  );
-
-CREATE POLICY "Users see own anomalies" ON anomalies
-  FOR ALL USING (
-    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid())
-  );
-```
-
-Also create a Supabase Storage bucket named `agent-screenshots` with public access enabled.
-
----
-
-## Environment Variables
-
-Create a `.env` file in the project root based on `.env.example`:
-
-```env
-# Supabase
-SUPABASE_URL=https://your-project-id.supabase.co
-SUPABASE_SERVICE_KEY=your-service-role-key        # Use service key for backend (bypasses RLS)
-SUPABASE_ANON_KEY=your-anon-key                   # Use anon key for user-facing auth
-
-# Gemini LLM (via Google AI Studio)
-GEMINI_API_KEY=your-gemini-api-key
-
-# Scheduler
-CHECK_INTERVAL_MINUTES=10                          # Global default, overridden per site
-
-# Alerting (optional)
-WEBHOOK_URL=https://hooks.slack.com/services/...   # Slack webhook for anomaly alerts
-
-# FastAPI
-API_HOST=0.0.0.0
-API_PORT=8000
-```
-
----
-
-## Agent Details
-
-### 1. Orchestrator Agent (`orchestrator/agent.py`)
-
-**Role:** The brain. Reads all active target sites from Supabase, uses Gemini LLM to decide which browser flows to simulate for each, then dispatches tasks to the Browser Agent and Monitor Agent.
-
-**Framework:** LangGraph `StateGraph`
-
-**State schema:**
-```python
-class OrchestratorState(TypedDict):
-    sites: list[dict]           # Fetched from Supabase target_sites
-    current_site: dict          # Site currently being processed
-    planned_flow: str           # LLM-generated action plan for browser agent
-    monitor_result: dict        # Result from monitor agent
-    browser_result: dict        # Result from browser agent
-    run_complete: bool
-```
-
-**LangGraph nodes:**
-- `fetch_sites` — queries Supabase for all active sites
-- `plan_flow` — calls Gemini with the site URL and `session_flow` description to generate a structured action plan
-- `dispatch_browser` — passes action plan to Browser Agent
-- `dispatch_monitor` — triggers Monitor Agent health check
-- `log_results` — writes run results to Supabase `agent_runs`
-
-**LangGraph edges:**
-```
-fetch_sites → plan_flow → dispatch_browser → dispatch_monitor → log_results
-                                                    ↓ (if anomaly detected)
-                                              trigger_alert
-```
-
----
-
-### 2. Browser Agent (`browser_agent/agent.py`)
-
-**Role:** Simulates realistic user sessions using Playwright. Receives an action plan from the Orchestrator and executes steps like navigation, clicks, scrolls, and form fills. Takes a screenshot at the end of each session.
-
-**Framework:** LangChain Agent with custom Playwright tools
-
-**Available tools (defined in `browser_agent/actions.py`):**
-- `navigate(url)` — opens URL in headless browser
-- `click(selector)` — clicks a CSS selector or XPath
-- `fill_form(selector, value)` — fills an input field
-- `scroll(direction, amount)` — scrolls page
-- `screenshot()` — captures page as PNG, uploads to Supabase Storage, returns public URL
-- `get_page_title()` — returns current page title (used to verify navigation success)
-
-**Session flow example:**
-
-The Orchestrator sends a plan like:
-```
-1. Navigate to https://myapp.onrender.com
-2. Wait for page load
-3. Click the "Features" link in the navbar
-4. Scroll down 500px
-5. Navigate to /about
-6. Take a screenshot
-```
-
-The Browser Agent parses this and executes each step using Playwright tools.
-
-**Playwright setup:** Uses `async_playwright` with a headless Chromium context. Each session is isolated (new browser context per run).
-
----
-
-### 3. Monitor Agent (`monitor_agent/agent.py`)
-
-**Role:** Performs HTTP health checks on each target site, measures latency, detects anomalies, and sends alerts when thresholds are breached.
-
-**Framework:** Pure Python with `httpx` (no LLM needed here — deterministic logic)
-
-**Health check logic (`monitor_agent/checker.py`):**
-- Sends GET request to target URL using `httpx.AsyncClient`
-- Records: status code, latency in ms, response size
-- Anomaly thresholds:
-  - Status code not 2xx → anomaly
-  - Latency > 5000ms → anomaly
-  - Connection timeout → anomaly
-
-**Anomaly detection:** Uses a simple z-score over the last 10 runs stored in Supabase. If the current latency is more than 2 standard deviations above the rolling average, it's flagged as an anomaly even if within the absolute threshold.
-
-**Alerting (`monitor_agent/alerter.py`):**
-- On anomaly: POST to `WEBHOOK_URL` (Slack incoming webhook format)
-- Payload includes: site name, URL, latency, error message, timestamp
-- Inserts a row into Supabase `anomalies` table
-
----
-
-## Supabase Client (`db/supabase_client.py`)
-
-Single shared client used by all agents and the API. Uses the service role key (bypasses RLS) since all operations are backend-initiated.
-
-**Key functions:**
-```python
-get_active_sites() -> list[dict]
-log_run(site_id, agent_type, status, latency_ms, notes, screenshot_url) -> None
-log_anomaly(site_id, latency_ms, error_message) -> None
-resolve_anomaly(anomaly_id) -> None
-upload_screenshot(site_id, image_bytes) -> str   # Returns public URL
-```
-
-**Realtime subscription (optional dashboard feature):**
-```python
-supabase.realtime.channel("agent_runs").on(
-    "postgres_changes",
-    event="INSERT",
-    schema="public",
-    table="agent_runs",
-    callback=handle_new_run
-).subscribe()
-```
-
----
-
-## FastAPI Dashboard (`api/main.py`)
-
-Provides a REST API to manage target sites and inspect logs. Intended to be paired with a minimal frontend (or called directly via curl/Postman).
-
-**Endpoints:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/sites` | List all target sites |
-| POST | `/sites` | Add a new target site |
-| PUT | `/sites/{id}` | Update site config |
-| DELETE | `/sites/{id}` | Remove a site |
-| GET | `/runs` | List recent agent runs (filterable by site_id) |
-| GET | `/anomalies` | List unresolved anomalies |
-| POST | `/anomalies/{id}/resolve` | Mark anomaly as resolved |
-| POST | `/sites/trigger` | Queue an orchestrator run for one site (`{"site_id": ...}`) or all active sites; returns 202 immediately |
-| GET | `/health` | API health check (includes whether the scheduler is running) |
-
-**Authentication:** Supabase JWT token passed in `Authorization: Bearer <token>` header, verified against Supabase Auth. Each user only sees and controls their own sites, runs and anomalies. With `MOCK_SUPABASE=true` auth is disabled for local development.
-
----
-
-## Scheduler (`scheduler/runner.py`)
-
-Uses `APScheduler` (AsyncIOScheduler) with a one-minute tick. Each tick runs the Orchestrator only for sites whose own `check_interval_minutes` has elapsed since their last run (`CHECK_INTERVAL_MINUTES` is the default for sites without one).
-
-The scheduler runs in the same process as the FastAPI app (started in `api/main.py` lifespan events) to keep Docker services minimal.
-
----
-
-## Docker Setup
-
-All services run in a single Docker Compose file. There is no database container — Supabase is used as the external managed database.
-
-```yaml
-# docker-compose.yml
-version: "3.9"
-
-services:
-  app:
-    build: .
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    volumes:
-      - ./:/app
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-
-  # Playwright requires system dependencies
-  # Use the official Playwright Docker base image
-```
-
-**Dockerfile:**
-```dockerfile
-FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-RUN playwright install chromium
-
-COPY . .
-
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
----
-
-## Requirements
-
-```txt
-# requirements.txt
-
-# Agent framework
-langchain>=0.2.0
-langchain-google-genai>=1.0.0
-langgraph>=0.1.0
-
-# Browser automation
-playwright>=1.44.0
-
-# HTTP & async
-httpx>=0.27.0
-asyncio
-
-# Database
-supabase>=2.4.0
-
-# API
-fastapi>=0.111.0
-uvicorn>=0.30.0
-pydantic>=2.0.0
-
-# Scheduler
-apscheduler>=3.10.0
-
-# Utilities
-python-dotenv>=1.0.0
-loguru>=0.7.0
+├── Dockerfile
+└── docker-compose.yml
 ```
 
 ---
@@ -421,38 +115,149 @@ loguru>=0.7.0
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/your-username/sitekeeper.git
-cd sitekeeper
+git clone https://github.com/garvitbajajj/WakeFulAI.git
+cd WakeFulAI
 
-# 2. Create virtual environment
+# 2. Create a virtual environment
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 3. Install dependencies
+# 3. Install dependencies and the browser
 pip install -r requirements.txt
-
-# 4. Install Playwright browsers
 playwright install chromium
 
-# 5. Set up environment variables
-cp .env.example .env
-# Fill in SUPABASE_URL, SUPABASE_SERVICE_KEY, GEMINI_API_KEY
+# 4. Configure
+cp .env.example .env      # then edit — see Environment Variables
 
-# 6. Run Supabase schema SQL (in Supabase SQL editor)
-# Paste contents of supabase_schema.sql
-
-# 7. Start the app
+# 5. Start the app
 uvicorn api.main:app --reload
-
-# OR with Docker
-docker-compose up --build
 ```
+
+- Dashboard: http://localhost:8000
+- Interactive API docs: http://localhost:8000/docs
+
+### Running without Supabase
+
+Set `MOCK_SUPABASE=true` in `.env` and the whole stack runs with no Supabase
+project at all: records are written to a local `.local_db.json`, screenshots
+to `.screenshots/` (served at `/screenshots`), and JWT verification is skipped
+so every request is treated as a single local user. It is the fastest way to
+see the agents work end to end, and it is strictly a development mode — never
+set it on a deployment, since it removes authentication.
+
+### Running with Supabase
+
+1. Create a Supabase project.
+2. Run [`supabase_schema.sql`](supabase_schema.sql) in the SQL editor. It is safe to re-run — tables use `IF NOT EXISTS` and policies are dropped and recreated.
+3. Create a **public** Storage bucket named `agent-screenshots`.
+4. Set `MOCK_SUPABASE=false`, `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `.env`.
+
+If `MOCK_SUPABASE` is not `true` and the Supabase credentials are missing, the app refuses to start rather than silently running without auth.
 
 ---
 
-## Adding a Target Site
+## Environment Variables
 
-Via the API:
+| Variable | Default | Purpose |
+|---|---|---|
+| `MOCK_SUPABASE` | `false` | `true` = local JSON DB and no auth (dev only) |
+| `SUPABASE_URL` | — | Supabase project URL (required when not mocked) |
+| `SUPABASE_SERVICE_KEY` | — | Service-role key; the backend uses it for all DB access |
+| `GEMINI_API_KEY` | — | Google AI Studio key for the planner |
+| `MOCK_GEMINI` | `true` | `true` = skip Gemini and use the rule-based planner |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Gemini model; the `-latest` alias survives model retirements |
+| `CHECK_INTERVAL_MINUTES` | `10` | Check interval for sites that don't set their own |
+| `WEBHOOK_URL` | — | Slack incoming webhook; alerts are only logged if unset |
+
+---
+
+## Database
+
+Defined in [`supabase_schema.sql`](supabase_schema.sql):
+
+| Table | Holds |
+|---|---|
+| `target_sites` | URL, name, plain-English `session_flow`, `check_interval_minutes`, `is_active`, owner `user_id` |
+| `agent_runs` | One row per agent per run: `agent_type` (`browser` / `monitor` / `orchestrator`), `status` (`success` / `failure` / `anomaly`), latency, notes, screenshot URL |
+| `anomalies` | Detected incidents with latency, error message and `resolved` flag |
+
+Row Level Security limits every table to the owning user. The backend uses the service-role key (which bypasses RLS) and filters by user in the API itself.
+
+---
+
+## How a Run Works
+
+### 1. Orchestrator (`orchestrator/graph.py`)
+
+A LangGraph `StateGraph` that processes sites one at a time:
+
+```
+fetch_sites → plan_flow ──(no sites left)──→ END
+                  │
+                  ▼
+          dispatch_browser → dispatch_monitor → log_results ─┐
+                  ▲                                          │
+                  └────────────── next site ─────────────────┘
+```
+
+- `fetch_sites` — uses the sites it was given (scheduler / manual trigger), otherwise all active sites
+- `plan_flow` — takes the next site and turns its `session_flow` into steps (falls back to just opening the URL if planning fails)
+- `dispatch_browser` — runs the steps in Playwright
+- `dispatch_monitor` — runs the HTTP health check
+- `log_results` — uploads the screenshot, logs the browser run and a combined orchestrator run (`anomaly` if either agent saw one, `failure` if either failed)
+
+### 2. Planner (`orchestrator/planner.py`)
+
+Sends the site URL and `session_flow` to Gemini (via `langchain-google-genai`) and asks for a JSON array of steps. When `MOCK_GEMINI=true`, no key is set, or Gemini errors, a rule-based parser handles it instead: it splits the text into sentences and matches *navigate / go to / open* (with an optional `/path`), *click* (quoted text or the words after "click"), *fill / type / enter* (quoted value; email/password inputs detected), and *scroll* (up/down plus pixels), and always starts by opening the site URL.
+
+### 3. Browser Agent (`browser_agent/agent.py`)
+
+Runs the steps in order in a fresh headless Chromium (1280×720):
+
+| Step | Example |
+|---|---|
+| `navigate` | `{"action": "navigate", "url": "https://myapp.com/about"}` — waits for network idle |
+| `click` | `{"action": "click", "selector": "text=Get Started"}` |
+| `fill` | `{"action": "fill", "selector": "input[type=email]", "value": "me@example.com"}` |
+| `scroll` | `{"action": "scroll", "direction": "down", "amount": 500}` |
+| `screenshot` | `{"action": "screenshot"}` |
+
+It stops at the first failing step and screenshots the page at that point; otherwise it screenshots the final page. Unknown actions are skipped.
+
+### 4. Monitor Agent (`monitor_agent/`)
+
+A plain `httpx` GET (10s timeout) — no LLM. The check is an **anomaly** when:
+
+- the status code is not 2xx
+- latency is over 5000 ms
+- the request fails (timeout, DNS, connection error)
+- latency is a spike: z-score > 2 against the site's last 10 successful monitor checks (needs at least 5) **and** over 1000 ms, so small jitter isn't flagged
+
+**Alerting is once per incident:** the first anomaly inserts an `anomalies` row and posts to Slack; while it stays open, further anomalies are logged but not re-alerted; the next healthy check resolves it and posts a recovery message.
+
+---
+
+## API & Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Dashboard |
+| GET | `/sites` | List your sites |
+| POST | `/sites` | Add a site |
+| PUT | `/sites/{id}` | Update a site |
+| DELETE | `/sites/{id}` | Delete a site (and its runs and anomalies) |
+| POST | `/sites/trigger` | Queue a run for one site (`{"site_id": ...}`) or all your active sites; returns 202 immediately |
+| GET | `/runs` | Recent runs (`?site_id=`, `?limit=` up to 100) |
+| GET | `/anomalies` | Unresolved anomalies |
+| POST | `/anomalies/{id}/resolve` | Mark an anomaly resolved |
+| GET | `/health` | API status, including whether the scheduler is running |
+
+**Authentication:** a Supabase JWT in the `Authorization: Bearer <token>` header, verified against Supabase Auth. Requests for another user's site return 404. With `MOCK_SUPABASE=true` auth is disabled.
+
+**Dashboard:** add, run and delete sites; a live feed of runs with status, latency and zoomable screenshots; an anomaly panel with resolve buttons. The run feed and anomalies refresh every 10 seconds. All server data is escaped before rendering, since run notes include text from the monitored pages.
+
+### Adding a site
+
 ```bash
 curl -X POST http://localhost:8000/sites \
   -H "Content-Type: application/json" \
@@ -460,51 +265,86 @@ curl -X POST http://localhost:8000/sites \
   -d '{
     "url": "https://myapp.onrender.com",
     "name": "My Render App",
-    "session_flow": "Navigate to the homepage, click the Get Started button, scroll down to the features section, navigate to the /about page",
+    "session_flow": "Navigate to the homepage, click \"Get Started\", scroll down 500, go to /about",
     "check_interval_minutes": 10
   }'
 ```
 
-The Orchestrator will pick this up on the next scheduled run, pass the `session_flow` to Gemini for structured planning, and dispatch the Browser Agent to simulate the session.
+The scheduler picks it up within a minute, or run it immediately with `POST /sites/trigger`.
+
+---
+
+## Scheduler (`scheduler/runner.py`)
+
+An `AsyncIOScheduler` ticks every minute and runs the orchestrator only for sites whose own `check_interval_minutes` has elapsed since their last run. It starts and stops with the FastAPI app (lifespan events), so everything runs in one process.
+
+---
+
+## Docker
+
+```bash
+docker-compose up --build
+```
+
+The image is built on the official Playwright Python image (Chromium and its system dependencies included) and serves the app on port 8000. Compose loads `.env`, mounts the project into the container and restarts it automatically. There is no database container — Supabase is external.
+
+---
+
+## Tests
+
+```bash
+pytest
+```
+
+17 tests across six files cover the API routes (including per-user isolation), the browser agent, the database layer, the monitor's anomaly rules, z-score detection and once-per-incident alerting, and the scheduler's per-site intervals. `tests/conftest.py` forces mock mode, so no Supabase project or API key is needed. The API trigger test queues a real browser run in the background; it passes offline, since a failed run doesn't fail the test.
+
+---
+
+## Known Limitations
+
+- **No login screen** — in live mode the API requires a JWT, but the dashboard doesn't send one yet, so it only works in mock mode. Use the API with a token until a login form is added.
+- **Last-run times are in memory** — after a restart, every site runs on the first tick.
+- **Sites run one at a time** — fine for a handful of sites; a large list would need concurrent runs.
+- **Only the monitor raises anomalies** — a failed browser journey is logged as a `failure` run but doesn't alert.
+- **No retention** — old runs and screenshots are never deleted.
 
 ---
 
 ## Key Design Decisions
 
 **Why LangGraph over vanilla LangChain agents?**
-LangGraph allows explicit control over agent-to-agent communication via a typed state graph. This makes the orchestrator's routing logic transparent and debuggable — critical for a system running unattended.
+An explicit, typed state graph makes the orchestrator's flow transparent and debuggable — important for something that runs unattended.
 
-**Why Playwright over raw HTTP pings?**
-Platforms detect simple HTTP pings and may not count them as "activity." Playwright spins up a real Chromium instance that renders JavaScript, fires browser events, and behaves like an actual user — harder to distinguish from real traffic.
+**Why Playwright over plain HTTP pings?**
+A ping only proves the server answers. A real browser runs the JavaScript and walks a user journey, so it catches a broken frontend, a missing button or a failing login that a 200 response would hide — and the screenshot shows what went wrong.
 
-**Why Supabase over a local database?**
-This project is designed to run on a free VPS or always-on machine (not the platforms it monitors). Supabase provides managed PostgreSQL, Storage, Auth, and Realtime without additional infrastructure cost or management overhead.
+**Why Supabase?**
+WakeFulAI is meant to run on an always-on machine, not the platforms it monitors. Supabase provides managed Postgres, file storage and auth without extra infrastructure.
 
-**Why APScheduler inside FastAPI instead of a separate service?**
-Keeps Docker Compose simple — one container instead of two. The scheduler runs in background threads managed by FastAPI's lifespan context.
+**Why run the scheduler inside FastAPI?**
+One process and one container. APScheduler's `AsyncIOScheduler` shares FastAPI's event loop and is started and stopped by the app's lifespan.
 
 ---
 
 ## Deployment
 
-Deploy this system on something that does **not** sleep. Recommended options:
+Deploy WakeFulAI on something that does **not** sleep:
 
 - **Oracle Cloud Free Tier** — always-free ARM VM, enough for this workload
-- **Fly.io** — paid tier ($0 with their free allowance), does not sleep
-- **Your own machine** — run as a systemd service
+- **A small VPS** or **your own machine** — run with Docker or as a systemd service
 
-Do **not** deploy SiteKeeper itself on Render/Railway free tier — it would be the thing that needs to keep itself alive.
+Do **not** deploy WakeFulAI itself on Render/Railway free tier — it would be the thing that needs to keep itself alive.
 
 ---
 
 ## Resume / Interview Talking Points
 
-- **Multi-agent architecture:** Orchestrator uses LangGraph state graph to coordinate Browser and Monitor agents with conditional routing based on health signal
-- **LLM-driven planning:** Gemini interprets natural language session descriptions and generates structured browser action sequences at runtime
-- **Browser automation:** Playwright simulates real Chromium sessions — not HTTP pings — making activity indistinguishable from a human user
-- **Observability:** Rolling z-score anomaly detection on latency metrics; all runs logged to Supabase with screenshot evidence
-- **Supabase integration:** PostgreSQL for structured logs, Storage for screenshots, Realtime for live dashboard updates, Auth + RLS for multi-user security
-- **Production-ready:** Dockerized, environment-variable driven, FastAPI REST control plane, APScheduler for reliable job management
+- **Multi-agent orchestration:** LangGraph state graph coordinating planner, browser and monitor agents in a per-site loop
+- **LLM-driven planning:** Gemini turns plain-English journeys into structured browser steps at runtime, with a deterministic fallback so runs never depend on the LLM
+- **Browser automation:** real Chromium sessions with screenshot evidence of the final page or the failing step
+- **Observability:** rolling z-score latency anomaly detection, once-per-incident alerting with automatic recovery
+- **Security:** Supabase Auth, per-user data isolation in the API and via Row Level Security, fail-closed configuration, XSS-safe dashboard
+- **Engineering:** Dockerized, FastAPI REST control plane, per-site scheduling, 17 automated tests
 
 ---
 
