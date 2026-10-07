@@ -92,7 +92,7 @@ async def _execute_browser_plan(steps: list[dict], site_id: str) -> dict:
 
     except Exception as run_error:
         status = "failure"
-        error_message = f"Browser session crashed: {str(run_error)}"
+        error_message = f"Browser session crashed: {type(run_error).__name__}: {run_error}"
         logger.error(f"Browser crash: {traceback.format_exc()}")
         results.append(error_message)
 
