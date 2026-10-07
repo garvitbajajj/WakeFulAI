@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS anomalies (
   resolved BOOLEAN DEFAULT false
 );
 
+-- Indexes for the foreign keys (runs are always read per site, newest first)
+CREATE INDEX IF NOT EXISTS target_sites_user_id_idx ON target_sites (user_id);
+CREATE INDEX IF NOT EXISTS agent_runs_site_id_created_at_idx ON agent_runs (site_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS anomalies_site_id_idx ON anomalies (site_id);
+
 -- Row Level Security
 ALTER TABLE target_sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
