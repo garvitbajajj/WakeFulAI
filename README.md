@@ -148,9 +148,8 @@ set it on a deployment, since it removes authentication.
 ### Running with Supabase
 
 1. Create a Supabase project.
-2. Run [`supabase_schema.sql`](supabase_schema.sql) in the SQL editor. It is safe to re-run — tables use `IF NOT EXISTS` and policies are dropped and recreated.
-3. Create a **public** Storage bucket named `agent-screenshots`.
-4. Set `MOCK_SUPABASE=false`, `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `.env`.
+2. Run [`supabase_schema.sql`](supabase_schema.sql) in the SQL editor. It creates the tables, indexes, RLS policies and the public `agent-screenshots` Storage bucket, and is safe to re-run.
+3. Set `MOCK_SUPABASE=false`, `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `.env`.
 
 If `MOCK_SUPABASE` is not `true` and the Supabase credentials are missing, the app refuses to start rather than silently running without auth.
 

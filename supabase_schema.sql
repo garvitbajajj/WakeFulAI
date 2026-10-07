@@ -63,3 +63,8 @@ CREATE POLICY "Users see own anomalies" ON anomalies
   FOR ALL USING (
     site_id IN (SELECT id FROM target_sites WHERE user_id = (select auth.uid()))
   );
+
+-- Public bucket for browser-run screenshots
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('agent-screenshots', 'agent-screenshots', true)
+ON CONFLICT (id) DO NOTHING;
