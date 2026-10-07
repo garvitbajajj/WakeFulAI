@@ -298,7 +298,7 @@ The image is built on the official Playwright Python image (Chromium and its sys
 pytest
 ```
 
-17 tests across six files cover the API routes (including per-user isolation), the browser agent, the database layer, the monitor's anomaly rules, z-score detection and once-per-incident alerting, and the scheduler's per-site intervals. `tests/conftest.py` forces mock mode, so no Supabase project or API key is needed. The API trigger test queues a real browser run in the background; it passes offline, since a failed run doesn't fail the test.
+19 tests across five test files cover the API routes (including per-user isolation and the dashboard's login config), the browser agent (including the Windows event-loop fallback), the database layer, the monitor's anomaly rules, z-score detection and once-per-incident alerting, and the scheduler's per-site intervals. `tests/conftest.py` forces mock mode, so no Supabase project or API key is needed. The API trigger test queues a real browser run in the background; it passes offline, since a failed run doesn't fail the test.
 
 ---
 
@@ -345,7 +345,7 @@ Do **not** deploy WakeFulAI itself on Render/Railway free tier — it would be t
 - **Browser automation:** real Chromium sessions with screenshot evidence of the final page or the failing step
 - **Observability:** rolling z-score latency anomaly detection, once-per-incident alerting with automatic recovery
 - **Security:** Supabase Auth, per-user data isolation in the API and via Row Level Security, fail-closed configuration, XSS-safe dashboard
-- **Engineering:** Dockerized, FastAPI REST control plane, per-site scheduling, 17 automated tests
+- **Engineering:** Dockerized, FastAPI REST control plane, per-site scheduling, 19 automated tests
 
 ---
 
