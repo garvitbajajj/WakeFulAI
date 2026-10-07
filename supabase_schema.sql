@@ -46,19 +46,20 @@ ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE anomalies ENABLE ROW LEVEL SECURITY;
 
 -- The backend uses the service_role key, which bypasses RLS; these policies lock down anon/user-key access.
+-- auth.uid() is wrapped in a subselect so Postgres evaluates it once per query, not once per row.
 DROP POLICY IF EXISTS "Users see own sites" ON target_sites;
 DROP POLICY IF EXISTS "Users see own runs" ON agent_runs;
 DROP POLICY IF EXISTS "Users see own anomalies" ON anomalies;
 
 CREATE POLICY "Users see own sites" ON target_sites
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users see own runs" ON agent_runs
   FOR ALL USING (
-    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid())
+    site_id IN (SELECT id FROM target_sites WHERE user_id = (select auth.uid()))
   );
 
 CREATE POLICY "Users see own anomalies" ON anomalies
   FOR ALL USING (
-    site_id IN (SELECT id FROM target_sites WHERE user_id = auth.uid())
+    site_id IN (SELECT id FROM target_sites WHERE user_id = (select auth.uid()))
   );
