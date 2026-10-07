@@ -1,10 +1,26 @@
+import asyncio
+import sys
 import time
 import traceback
 from loguru import logger
 from .session import session_manager
 from . import actions
 
+def _run_on_proactor_loop(coro):
+    loop = asyncio.ProactorEventLoop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
 async def execute_browser_plan(steps: list[dict], site_id: str) -> dict:
+    # Playwright spawns a driver subprocess, which on Windows needs a ProactorEventLoop.
+    # uvicorn --reload runs a SelectorEventLoop there, so give the session its own loop in a thread.
+    if sys.platform == "win32" and not isinstance(asyncio.get_running_loop(), asyncio.ProactorEventLoop):
+        return await asyncio.to_thread(_run_on_proactor_loop, _execute_browser_plan(steps, site_id))
+    return await _execute_browser_plan(steps, site_id)
+
+async def _execute_browser_plan(steps: list[dict], site_id: str) -> dict:
     """
     Executes a list of planned actions sequentially on a headless browser.
     Each step should be a dict like:

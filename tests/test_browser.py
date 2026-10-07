@@ -1,3 +1,5 @@
+import asyncio
+import sys
 import pytest
 from unittest.mock import AsyncMock, patch
 from browser_agent.agent import execute_browser_plan
@@ -54,3 +56,26 @@ async def test_execute_browser_plan_failure():
             assert result["status"] == "failure"
             assert "Navigation Timeout" in result["error_message"]
             assert result["screenshot_bytes"] == b"error-screenshot-binary"
+
+@pytest.mark.skipif(sys.platform != "win32", reason="SelectorEventLoop fallback only applies on Windows")
+def test_execute_browser_plan_on_selector_loop():
+    # uvicorn --reload uses a SelectorEventLoop on Windows, which can't spawn Playwright's driver
+    mock_page = AsyncMock()
+    mock_page.screenshot.return_value = b"png"
+
+    class MockSessionContext:
+        async def __aenter__(self):
+            # Proves the session runs on a Proactor loop even though the caller's loop is a Selector
+            assert isinstance(asyncio.get_running_loop(), asyncio.ProactorEventLoop)
+            return mock_page
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    with patch("browser_agent.session.session_manager.get_page", return_value=MockSessionContext()), \
+         patch("browser_agent.actions.navigate", return_value="Navigated"):
+        loop = asyncio.SelectorEventLoop()
+        try:
+            result = loop.run_until_complete(execute_browser_plan([{"action": "navigate", "url": "https://example.com"}], "s"))
+        finally:
+            loop.close()
+    assert result["status"] == "success", result["error_message"]
